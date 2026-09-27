@@ -358,16 +358,27 @@
 
   <div class="book" id="authScreen" style="display:none;">
     <div class="section" style="border-bottom:none;">
-      <h2 class="section-title">Masuk</h2>
-      <p style="font-size:13.5px;color:var(--ink-muted);margin:0 0 16px;">Masukkan email Anda, dan kami akan mengirimkan tautan masuk (tanpa kata sandi).</p>
+      <h2 class="section-title" id="authTitle">Masuk</h2>
+      <p style="font-size:13.5px;color:var(--ink-muted);margin:0 0 16px;" id="authSubtitle">Masuk dengan email dan PIN Anda.</p>
       <form id="authForm" class="entry-line">
         <div class="field field-full">
           <label for="authEmail">Email</label>
-          <input type="email" id="authEmail" placeholder="anda@email.com" required>
+          <input type="email" id="authEmail" placeholder="anda@email.com" required autocomplete="email">
+        </div>
+        <div class="field field-full">
+          <label for="authPin">PIN (6 digit angka)</label>
+          <input type="password" id="authPin" inputmode="numeric" pattern="[0-9]*" minlength="6" maxlength="6" placeholder="••••••" required autocomplete="current-password">
+        </div>
+        <div class="field field-full" id="authPinConfirmWrap" style="display:none;">
+          <label for="authPinConfirm">Konfirmasi PIN</label>
+          <input type="password" id="authPinConfirm" inputmode="numeric" pattern="[0-9]*" minlength="6" maxlength="6" placeholder="••••••" autocomplete="new-password">
         </div>
         <div class="form-msg" id="authMsg" style="color:var(--ink-muted);"></div>
-        <button type="submit" class="add-btn" id="authBtn">Kirim tautan masuk</button>
+        <button type="submit" class="add-btn" id="authBtn">Masuk</button>
       </form>
+      <p style="text-align:center;margin-top:14px;font-size:13px;">
+        <a href="#" id="authToggleMode" style="color:var(--gold);text-decoration:none;">Belum punya akun? Daftar</a>
+      </p>
     </div>
   </div>
 
@@ -453,7 +464,7 @@
 (function () {
   // ====== CONFIGURE THESE WITH YOUR OWN SUPABASE PROJECT ======
   const SUPABASE_URL = "https://pvhvqfjjltyqzcrjuplg.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
+  const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
   // ==============================================================
 
   const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -808,11 +819,44 @@ const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
   const appScreen = document.getElementById("appScreen");
   const authForm = document.getElementById("authForm");
   const authEmail = document.getElementById("authEmail");
+  const authPin = document.getElementById("authPin");
+  const authPinConfirm = document.getElementById("authPinConfirm");
+  const authPinConfirmWrap = document.getElementById("authPinConfirmWrap");
   const authMsg = document.getElementById("authMsg");
   const authBtn = document.getElementById("authBtn");
+  const authTitle = document.getElementById("authTitle");
+  const authSubtitle = document.getElementById("authSubtitle");
+  const authToggleMode = document.getElementById("authToggleMode");
   const signOutBtn = document.getElementById("signOutBtn");
 
   let realtimeChannel = null;
+  let authMode = "login"; // "login" | "register"
+
+  function setAuthMode(mode) {
+    authMode = mode;
+    authMsg.textContent = "";
+    authForm.reset();
+    if (mode === "register") {
+      authTitle.textContent = "Daftar";
+      authSubtitle.textContent = "Buat akun dengan email dan PIN 6 digit.";
+      authBtn.textContent = "Daftar";
+      authPinConfirmWrap.style.display = "";
+      authPinConfirm.required = true;
+      authToggleMode.textContent = "Sudah punya akun? Masuk";
+    } else {
+      authTitle.textContent = "Masuk";
+      authSubtitle.textContent = "Masuk dengan email dan PIN Anda.";
+      authBtn.textContent = "Masuk";
+      authPinConfirmWrap.style.display = "none";
+      authPinConfirm.required = false;
+      authToggleMode.textContent = "Belum punya akun? Daftar";
+    }
+  }
+
+  authToggleMode.addEventListener("click", (e) => {
+    e.preventDefault();
+    setAuthMode(authMode === "login" ? "register" : "login");
+  });
 
   function showAuthScreen() {
     authScreen.style.display = "";
@@ -841,21 +885,36 @@ const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
 
   authForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    authMsg.style.color = "var(--ink-muted)";
+    authMsg.style.color = "var(--red)";
     authMsg.textContent = "";
+
     const email = authEmail.value.trim();
-    if (!email) return;
-    authBtn.disabled = true;
-    const { error } = await supabaseClient.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.href }
-    });
-    authBtn.disabled = false;
-    if (error) {
-      authMsg.style.color = "var(--red)";
-      authMsg.textContent = "Gagal mengirim tautan: " + error.message;
+    const pin = authPin.value.trim();
+    if (!/^\d{6}$/.test(pin)) {
+      authMsg.textContent = "PIN harus 6 digit angka.";
+      return;
+    }
+
+    if (authMode === "register") {
+      const pinConfirm = authPinConfirm.value.trim();
+      if (pin !== pinConfirm) {
+        authMsg.textContent = "Konfirmasi PIN tidak sama.";
+        return;
+      }
+      authBtn.disabled = true;
+      const { error } = await supabaseClient.auth.signUp({ email, password: pin });
+      authBtn.disabled = false;
+      if (error) {
+        authMsg.textContent = "Gagal mendaftar: " + error.message;
+      }
+      // onAuthStateChange handles the switch to the app screen once signed in
     } else {
-      authMsg.textContent = "Tautan masuk sudah dikirim, cek email Anda.";
+      authBtn.disabled = true;
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password: pin });
+      authBtn.disabled = false;
+      if (error) {
+        authMsg.textContent = "Email atau PIN salah.";
+      }
     }
   });
 
@@ -870,6 +929,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
       authMsg.textContent = "Isi SUPABASE_URL dan SUPABASE_ANON_KEY di bagian atas script.";
       return;
     }
+
+    setAuthMode("login");
 
     supabaseClient.auth.onAuthStateChange((event, session) => {
       if (session) {
