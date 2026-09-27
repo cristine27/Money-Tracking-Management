@@ -355,6 +355,23 @@
 <body>
 <div class="page">
   <p class="cover-title">Catatan Keuangan</p>
+
+  <div class="book" id="authScreen" style="display:none;">
+    <div class="section" style="border-bottom:none;">
+      <h2 class="section-title">Masuk</h2>
+      <p style="font-size:13.5px;color:var(--ink-muted);margin:0 0 16px;">Masukkan email Anda, dan kami akan mengirimkan tautan masuk (tanpa kata sandi).</p>
+      <form id="authForm" class="entry-line">
+        <div class="field field-full">
+          <label for="authEmail">Email</label>
+          <input type="email" id="authEmail" placeholder="anda@email.com" required>
+        </div>
+        <div class="form-msg" id="authMsg" style="color:var(--ink-muted);"></div>
+        <button type="submit" class="add-btn" id="authBtn">Kirim tautan masuk</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="appScreen" style="display:none;">
   <div class="book">
 
     <div class="hero">
@@ -423,15 +440,20 @@
       <div class="form-msg" id="exportMsg"></div>
     </div>
 
+    <div class="section" style="border-bottom:none; padding-top:14px; padding-bottom:18px;">
+      <button type="button" class="export-btn export-btn-secondary" id="signOutBtn" style="width:100%;">Keluar</button>
+    </div>
+
+  </div>
   </div>
   <p class="status-line" id="statusLine">memuat…</p>
 </div>
+
 <script>
 (function () {
   // ====== CONFIGURE THESE WITH YOUR OWN SUPABASE PROJECT ======
   const SUPABASE_URL = "https://pvhvqfjjltyqzcrjuplg.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
-
+const SUPABASE_ANON_KEY = "sb_publishable_A7-7yqlp_XNOFKj0PRTSAg_c2HywxYh";
   // ==============================================================
 
   const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -781,20 +803,88 @@
     render();
   }
 
+  // --- Auth ---
+  const authScreen = document.getElementById("authScreen");
+  const appScreen = document.getElementById("appScreen");
+  const authForm = document.getElementById("authForm");
+  const authEmail = document.getElementById("authEmail");
+  const authMsg = document.getElementById("authMsg");
+  const authBtn = document.getElementById("authBtn");
+  const signOutBtn = document.getElementById("signOutBtn");
+
+  let realtimeChannel = null;
+
+  function showAuthScreen() {
+    authScreen.style.display = "";
+    appScreen.style.display = "none";
+    statusLine.textContent = "";
+    if (realtimeChannel) {
+      supabaseClient.removeChannel(realtimeChannel);
+      realtimeChannel = null;
+    }
+  }
+
+  async function showAppScreen() {
+    authScreen.style.display = "none";
+    appScreen.style.display = "";
+    statusLine.textContent = "memuat…";
+    await loadExpenses();
+    if (!realtimeChannel) {
+      realtimeChannel = supabaseClient
+        .channel("expenses-changes")
+        .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
+          loadExpenses();
+        })
+        .subscribe();
+    }
+  }
+
+  authForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    authMsg.style.color = "var(--ink-muted)";
+    authMsg.textContent = "";
+    const email = authEmail.value.trim();
+    if (!email) return;
+    authBtn.disabled = true;
+    const { error } = await supabaseClient.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.href }
+    });
+    authBtn.disabled = false;
+    if (error) {
+      authMsg.style.color = "var(--red)";
+      authMsg.textContent = "Gagal mengirim tautan: " + error.message;
+    } else {
+      authMsg.textContent = "Tautan masuk sudah dikirim, cek email Anda.";
+    }
+  });
+
+  signOutBtn.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+  });
+
   async function init() {
     if (SUPABASE_URL.includes("YOUR-PROJECT-REF")) {
-      statusLine.textContent = "isi SUPABASE_URL dan SUPABASE_ANON_KEY di bagian atas script";
+      authScreen.style.display = "";
+      authMsg.style.color = "var(--red)";
+      authMsg.textContent = "Isi SUPABASE_URL dan SUPABASE_ANON_KEY di bagian atas script.";
       return;
     }
-    statusLine.textContent = "menyambungkan ke Supabase…";
-    await loadExpenses();
-    // Cross-device sync: refetch whenever any client changes the table
-    supabaseClient
-      .channel("expenses-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
-        loadExpenses();
-      })
-      .subscribe();
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        showAppScreen();
+      } else {
+        showAuthScreen();
+      }
+    });
+
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+      await showAppScreen();
+    } else {
+      showAuthScreen();
+    }
   }
 
   init();
